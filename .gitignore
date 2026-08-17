@@ -1,8 +1,8 @@
-data/sessions/
-data/*.json
+data/*
+!data/.gitkeep
 __pycache__/
 *.pyc
-*.pyo
+.pytest_cache/
 *.log
 .DS_Store
 Thumbs.db

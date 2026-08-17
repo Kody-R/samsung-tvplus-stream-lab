@@ -18,6 +18,8 @@ DEFAULTS = {
         "hls_list_size": 12,
         "hls_delete_threshold": 4,
         "render_device": "/dev/dri/renderD129",
+        "guide_cache_seconds": 900,
+        "guide_fetch_timeout_seconds": 30,
     },
     "streams": []
 }
@@ -52,6 +54,12 @@ class ConfigStore:
                 "user_agent":str(item.get("user_agent") or DEFAULT_UA),
                 "play_profile":str(item.get("play_profile") or "normalize-hls"),
                 "enabled":bool(item.get("enabled",True)),
+                "tvg_id":str(item.get("tvg_id") or sid).strip(),
+                "tvg_logo":str(item.get("tvg_logo") or "").strip(),
+                "group_title":str(item.get("group_title") or "Stream Lab").strip(),
+                "channel_number":str(item.get("channel_number") or "").strip(),
+                "xmltv_url":str(item.get("xmltv_url") or "").strip(),
+                "xmltv_channel_id":str(item.get("xmltv_channel_id") or item.get("tvg_id") or sid).strip(),
             }
             if not clean["input_url"]: raise ValueError("Input URL is required")
             for i,old in enumerate(self.data["streams"]):

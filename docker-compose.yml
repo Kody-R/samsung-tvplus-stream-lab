@@ -1,10 +1,9 @@
+name: samsung-tvplus-stream-lab
+
 services:
   samsung-stream-lab:
-    build:
-      context: .
-      args:
-        VERSION: 0.1.1
-    image: samsung-tvplus-stream-lab:0.1.1
+    image: ghcr.io/kody-r/samsung-tvplus-stream-lab:latest
+    pull_policy: always
     container_name: samsung-stream-lab
     restart: unless-stopped
     ports:
@@ -12,4 +11,28 @@ services:
     environment:
       TZ: America/Chicago
     volumes:
-      - ./data:/app/data
+      - /DATA/AppData/samsung-tvplus-stream-lab/data:/app/data
+
+x-casaos:
+  id: com.github.kody-r.samsung-tvplus-stream-lab
+  main: samsung-stream-lab
+  index: /
+  port_map: "8091"
+  scheme: http
+  title:
+    en_US: Samsung TV Plus Stream Lab
+  tagline:
+    en_US: Diagnostic and stabilization proxy for Samsung TV Plus and FAST HLS streams.
+  description:
+    en_US: Samsung TV Plus Stream Lab normalizes troublesome FAST/SSAI HLS streams for Jellyfin while preserving detailed diagnostics.
+  icon: https://raw.githubusercontent.com/Kody-R/samsung-tvplus-stream-lab/main/samsung-tvplus-stream-lab-icon.svg
+  author: Kody-R
+  developer: Kody-R
+  category: Media
+  architectures:
+    - amd64
+  version: "0.1.2"
+  update_at: "2026-08-17"
+  repo: https://github.com/Kody-R/samsung-tvplus-stream-lab
+  website: https://github.com/Kody-R/samsung-tvplus-stream-lab
+  support: https://github.com/Kody-R/samsung-tvplus-stream-lab/issues

@@ -15,10 +15,12 @@ from pydantic import BaseModel
 from . import __version__
 from .config import ConfigStore
 from .ffmpeg import HLS_PROFILES, shell_join
+from .guide import GuideService, build_m3u
 from .session import SESSIONS, SessionManager
 
 config = ConfigStore()
 sessions = SessionManager(config)
+guide = GuideService(config)
 app = FastAPI(title="Samsung TV Plus Stream Lab", version=__version__)
 BASE = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
@@ -32,6 +34,12 @@ class StreamIn(BaseModel):
     user_agent: str = ""
     play_profile: str = "normalize-hls"
     enabled: bool = True
+    tvg_id: str = ""
+    tvg_logo: str = ""
+    group_title: str = "Stream Lab"
+    channel_number: str = ""
+    xmltv_url: str = ""
+    xmltv_channel_id: str = ""
 
 
 class StartIn(BaseModel):
@@ -58,10 +66,44 @@ def status():
     }
 
 
+@app.get("/playlist.m3u")
+def jellyfin_playlist(request: Request):
+    payload = build_m3u(config.streams(), str(request.base_url).rstrip("/"))
+    return Response(
+        payload,
+        media_type="audio/x-mpegurl",
+        headers={"Cache-Control": "no-cache", "Content-Disposition": 'inline; filename="stream-lab.m3u"'},
+    )
+
+
+@app.get("/guide.xml")
+def jellyfin_guide():
+    payload = guide.xml()
+    return Response(
+        payload,
+        media_type="application/xml",
+        headers={"Cache-Control": "no-cache", "Content-Disposition": 'inline; filename="stream-lab.xml"'},
+    )
+
+
+@app.get("/api/guide/status")
+def guide_status():
+    return guide.status()
+
+
+@app.post("/api/guide/refresh")
+def guide_refresh():
+    guide.invalidate()
+    payload = guide.xml(force=True)
+    return {"ok": True, "bytes": len(payload), **guide.status()}
+
+
 @app.post("/api/streams")
 def save_stream(body: StreamIn):
     try:
-        return config.upsert(body.model_dump())
+        saved = config.upsert(body.model_dump())
+        guide.invalidate()
+        return saved
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
@@ -69,6 +111,7 @@ def save_stream(body: StreamIn):
 @app.delete("/api/streams/{sid}")
 def delete_stream(sid: str):
     config.delete(sid)
+    guide.invalidate()
     return {"ok": True}
 
 
