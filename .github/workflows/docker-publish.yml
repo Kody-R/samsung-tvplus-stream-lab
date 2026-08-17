@@ -28,7 +28,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
+          username: kody-r
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
