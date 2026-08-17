@@ -1,63 +1,28 @@
-# Samsung TV Plus Stream Lab v0.2.0 Test Report
+# Samsung TV Plus Stream Lab v0.2.1 Test Report
 
-Build date: 2026-08-17
+## Regression fixed
 
-## Static / unit checks
+The v0.2.0 XMLTV channel index stopped scanning as soon as it encountered the first `<programme>` after finding at least one channel. That works only for XMLTV documents that declare all channels first.
 
-- Python compile: PASS
-- Pytest: 14/14 PASS
-- JavaScript syntax (`node --check`): PASS
-- YAML parse: PASS
-  - `docker-compose.yml`
-  - `docker-compose.dev.yml`
-  - `docker-compose.hw.yml`
-  - `casaos/docker-compose.yml`
-  - `.github/workflows/docker-publish.yml`
+v0.2.1 removes the early exit and continues streaming through the entire document, clearing programme elements to avoid retaining their bodies in memory.
 
-## Source importer tests
+## Automated validation
 
-PASS:
+- Python compilation: PASS
+- Pytest suite: PASS
+- Existing source-import tests: PASS
+- New interleaved XMLTV channel/programme regression test: PASS
+- JavaScript syntax: PASS
+- Compose/CasaOS/GitHub Actions YAML parsing: PASS
 
-- Parses full extended M3U metadata (`tvg-id`, logo, group, channel number, name, URL).
-- Resolves relative stream URLs against the playlist URL.
-- Reads XMLTV channel IDs.
-- Builds a normalized XMLTV display-name index for fallback guide matching.
-- Exported M3U contains only selected, currently-present channels.
-- Missing/unselected channels are excluded.
+## Real provider sample validation
 
-## End-to-end provider refresh test
+Using the supplied Samsung TV Plus M3U and XMLTV samples:
 
-A temporary local HTTP provider served a two-channel M3U and XMLTV guide.
+- M3U channels parsed: 514
+- XMLTV channel declarations indexed after sanitizing the browser-copied sample: 579
+- Exact M3U `tvg-id` values found in XMLTV: 514 / 514
+- v0.2.0 behavior reproduced: only 1 XMLTV channel indexed
+- v0.2.1 behavior: all 579 XMLTV channels indexed
 
-Initial import:
-
-- 2 channels imported.
-- Both new channels defaulted to unselected.
-- 2 XMLTV IDs matched.
-- One channel was selected through the API.
-- `/playlist.m3u` exported only the selected channel.
-- `/guide.xml` retained only the selected channel's programme data.
-
-The provider was then changed:
-
-- selected channel stream URL changed;
-- second channel disappeared;
-- a new third channel appeared.
-
-Refresh result:
-
-- 2 current upstream channels
-- 1 new
-- 1 removed/missing
-- 1 URL change
-- selected channel remained selected
-- selected channel adopted the new upstream URL
-- missing channel remained remembered and marked Missing
-- new channel remained unselected
-- exported M3U still contained only the selected current channel
-
-PASS.
-
-## Docker build limitation
-
-The build environment does not provide the Docker CLI/daemon, so an actual container image build could not be executed here. Dockerfile/Compose syntax and the application itself were validated independently. GitHub Actions is configured to perform the GHCR Docker build on push.
+The browser-copied XML sample contains display-layer text before the `<tv>` root and decoded bare ampersands; those were normalized only for offline regression validation. The application should continue to use the provider's actual XMLTV URL.

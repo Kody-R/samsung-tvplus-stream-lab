@@ -92,9 +92,12 @@ def xmltv_channel_index(payload: bytes) -> tuple[set[str], dict[str, list[str]]]
                         if norm:
                             names.setdefault(norm, []).append(cid)
                 elem.clear()
-            elif elem.tag == "programme" and ids:
-                # XMLTV normally declares all channels before programme records.
-                break
+            elif elem.tag == "programme":
+                # XMLTV permits channel/programme elements to be interleaved.
+                # Do not stop after the first programme: some providers emit a
+                # channel followed by its programmes before declaring the next
+                # channel. Clearing keeps the streaming parser memory-bounded.
+                elem.clear()
     except ET.ParseError:
         pass
     return ids, names

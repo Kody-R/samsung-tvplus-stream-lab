@@ -1,5 +1,5 @@
 FROM python:3.12-slim
-ARG VERSION=0.2.0
+ARG VERSION=0.2.1
 LABEL org.opencontainers.image.title="Samsung TV Plus Stream Lab" \
       org.opencontainers.image.description="Isolated IPTV HLS/FFmpeg troubleshooting laboratory" \
       org.opencontainers.image.version="${VERSION}"

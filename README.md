@@ -1,8 +1,8 @@
-# Samsung TV Plus Stream Lab v0.2.0
+# Samsung TV Plus Stream Lab v0.2.1
 
 Samsung TV Plus Stream Lab is a Docker/CasaOS IPTV stabilization gateway and diagnostic laboratory for Samsung TV Plus, FAST and SSAI HLS streams before they reach Jellyfin.
 
-v0.2.0 adds full playlist/guide ingestion and channel selection. Instead of manually adding every channel, give Stream Lab the provider M3U and XMLTV source, choose which channels you want, and Jellyfin receives a filtered playlist whose selected channels are routed through Stream Lab.
+v0.2.1 includes the v0.2 source-import/channel-selection workflow plus an XMLTV compatibility fix for providers that interleave channel and programme elements. Instead of manually adding every channel, give Stream Lab the provider M3U and XMLTV source, choose which channels you want, and Jellyfin receives a filtered playlist whose selected channels are routed through Stream Lab.
 
 ## Architecture
 
@@ -175,14 +175,14 @@ docker compose -f docker-compose.dev.yml -f docker-compose.hw.yml up -d --build
 
 ```text
 ghcr.io/kody-r/samsung-tvplus-stream-lab:latest
-ghcr.io/kody-r/samsung-tvplus-stream-lab:0.2.0
+ghcr.io/kody-r/samsung-tvplus-stream-lab:0.2.1
 ```
 
 Typical release push:
 
 ```bash
 git add .
-git commit -m "Release v0.2.0 - source import and channel selector"
+git commit -m "Release v0.2.1 - source import and channel selector"
 git push
 ```
 

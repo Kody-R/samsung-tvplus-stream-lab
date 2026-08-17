@@ -1,23 +1,24 @@
-# Samsung TV Plus Stream Lab v0.2.0 Release Notes
+# Samsung TV Plus Stream Lab v0.2.1 Release Notes
 
-v0.2.0 turns Stream Lab into a selective IPTV stabilization gateway for Jellyfin.
+v0.2.1 is a focused XMLTV compatibility bug-fix release for v0.2.0.
 
-## Highlights
+## Fixed
 
-- Add full M3U + XMLTV provider sources instead of entering channels one at a time.
-- Import all channels and preserve provider metadata such as tvg-id, logo, group and channel number.
-- Search/filter the imported catalog and select only the channels that should be exported to Jellyfin.
-- New channels default to unselected.
-- Provider refreshes preserve channel selections and per-channel processing profiles using a stable source key (tvg-id when available).
-- Missing upstream channels remain remembered/configured but are flagged Missing and excluded from the current exported M3U until they return.
-- Source refresh reports new channels, missing channels, URL changes and EPG matches.
-- Automatic source refresh defaults to every 6 hours and is configurable per source.
-- Selected channels default to Normalized HLS · Permissive, the Samsung/SSAI stabilization path validated in v0.1.1/v0.1.2 testing.
-- Per-channel processing profiles can be changed from the Channel Manager.
-- `/playlist.m3u` contains only selected, present channels and points them through Stream Lab rather than to the upstream provider.
-- `/guide.xml` filters the source XMLTV down to selected channels while preserving programme metadata and remapping IDs for Jellyfin alignment.
-- Large XMLTV documents are filtered with incremental parsing instead of building a complete second XML tree.
-- HLS relay FFmpeg processes are started on demand by Jellyfin and automatically stop after an idle timeout (30 seconds by default).
-- Manual diagnostic tests still do not auto-stop/restart and retain complete bundle instrumentation.
-- New UI tabs: Dashboard, Sources, Channels, Jellyfin and Diagnostics.
-- GitHub Actions publishes `ghcr.io/kody-r/samsung-tvplus-stream-lab:latest` and `:0.2.0`.
+- Fixed source EPG indexing for XMLTV documents that interleave `<channel>` and `<programme>` elements.
+- v0.2.0 incorrectly assumed every `<channel>` declaration appeared before the first `<programme>` and stopped indexing at that point.
+- Providers that emit one channel followed by its programmes, then the next channel, could therefore report only one EPG match.
+- The streaming XMLTV indexer now scans the complete document while clearing programme elements as it goes, keeping memory use bounded.
+- Exact `tvg-id` → XMLTV channel ID matching remains authoritative; unique normalized display-name matching remains the fallback.
+
+## Expected result for the supplied Samsung TV Plus provider sample
+
+- M3U channels: 514
+- XMLTV channel declarations: 579
+- Exact M3U `tvg-id` values present in XMLTV: 514 / 514
+- The CasaOS source refresh should therefore report approximately 514 EPG matches, rather than 1.
+
+## Packaging
+
+- GitHub Actions publishes `ghcr.io/kody-r/samsung-tvplus-stream-lab:latest` and `:0.2.1`.
+- CasaOS continues to use the persistent `/DATA/AppData/samsung-tvplus-stream-lab/data` volume.
+- No data migration is required from v0.2.0.

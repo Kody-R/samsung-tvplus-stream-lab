@@ -42,3 +42,20 @@ def test_xmltv_channel_name_index_supports_fallback_matching():
     assert ids == {"alpha", "beta"}
     assert names["alpha"] == ["alpha"]
     assert names["beta"] == ["beta"]
+
+INTERLEAVED_XML = b'''<?xml version="1.0"?>
+<tv>
+  <channel id="alpha"><display-name>Alpha</display-name></channel>
+  <programme channel="alpha" start="20260817100000 +0000" stop="20260817110000 +0000"><title>Alpha News</title></programme>
+  <channel id="beta"><display-name>Beta</display-name></channel>
+  <programme channel="beta" start="20260817110000 +0000" stop="20260817120000 +0000"><title>Beta Movie</title></programme>
+  <channel id="gamma"><display-name>Gamma</display-name></channel>
+</tv>'''
+
+
+def test_xmltv_channel_index_supports_interleaved_channels_and_programmes():
+    ids, names = xmltv_channel_index(INTERLEAVED_XML)
+    assert ids == {"alpha", "beta", "gamma"}
+    assert names["alpha"] == ["alpha"]
+    assert names["beta"] == ["beta"]
+    assert names["gamma"] == ["gamma"]
