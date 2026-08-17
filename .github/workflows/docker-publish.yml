@@ -34,14 +34,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build and push
+      - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:0.1.1
+            ghcr.io/${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ env.IMAGE_NAME }}:0.1.1
           labels: |
             org.opencontainers.image.source=https://github.com/Kody-R/samsung-tvplus-stream-lab
             org.opencontainers.image.version=0.1.1
