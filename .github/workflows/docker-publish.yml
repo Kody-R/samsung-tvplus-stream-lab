@@ -35,15 +35,13 @@ jobs:
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           tags: |
             ghcr.io/${{ env.IMAGE_NAME }}:latest
-            ghcr.io/${{ env.IMAGE_NAME }}:0.1.2
+            ghcr.io/${{ env.IMAGE_NAME }}:0.2.0
           labels: |
             org.opencontainers.image.source=https://github.com/Kody-R/samsung-tvplus-stream-lab
-            org.opencontainers.image.version=0.1.2
+            org.opencontainers.image.version=0.2.0
             org.opencontainers.image.description=Samsung TV Plus Stream Lab

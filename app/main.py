@@ -1,26 +1,28 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import __version__
-from .config import ConfigStore
+from .config import ConfigStore, DEFAULT_UA
 from .ffmpeg import HLS_PROFILES, shell_join
-from .guide import GuideService, build_m3u
+from .guide import GuideService, build_m3u, is_exported
 from .session import SESSIONS, SessionManager
+from .source import SourceService
 
 config = ConfigStore()
 sessions = SessionManager(config)
 guide = GuideService(config)
+sources = SourceService(config, guide)
 app = FastAPI(title="Samsung TV Plus Stream Lab", version=__version__)
 BASE = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
@@ -32,8 +34,9 @@ class StreamIn(BaseModel):
     name: str = ""
     input_url: str
     user_agent: str = ""
-    play_profile: str = "normalize-hls"
+    play_profile: str = "normalize-hls-permissive"
     enabled: bool = True
+    selected: bool | None = None
     tvg_id: str = ""
     tvg_logo: str = ""
     group_title: str = "Stream Lab"
@@ -42,8 +45,44 @@ class StreamIn(BaseModel):
     xmltv_channel_id: str = ""
 
 
+class SourceIn(BaseModel):
+    id: str
+    name: str = ""
+    m3u_url: str
+    xmltv_url: str = ""
+    user_agent: str = DEFAULT_UA
+    default_profile: str = "normalize-hls-permissive"
+    refresh_hours: float = Field(default=6, ge=1, le=168)
+    enabled: bool = True
+
+
 class StartIn(BaseModel):
     profile: str = "copy-null"
+
+
+class SelectionIn(BaseModel):
+    ids: list[str]
+    selected: bool
+
+
+class ChannelPatch(BaseModel):
+    selected: bool | None = None
+    play_profile: str | None = None
+    channel_number: str | None = None
+    group_title: str | None = None
+    tvg_logo: str | None = None
+    tvg_id: str | None = None
+    xmltv_channel_id: str | None = None
+
+
+@app.on_event("startup")
+def startup() -> None:
+    sources.start_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    sources.stop_scheduler()
 
 
 @app.get("/health")
@@ -56,34 +95,123 @@ def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "version": __version__})
 
 
+def _summary(streams: list[dict[str, Any]]) -> dict[str, Any]:
+    selected = [s for s in streams if bool(s.get("selected", s.get("enabled", True)))]
+    exported = [s for s in streams if is_exported(s)]
+    return {
+        "channels": len(streams),
+        "selected": len(selected),
+        "exported": len(exported),
+        "missing": sum(1 for s in streams if s.get("missing")),
+        "epg_matched": sum(1 for s in exported if s.get("epg_matched")),
+        "groups": len({str(s.get("group_title") or "") for s in streams}),
+    }
+
+
 @app.get("/api/status")
 def status():
+    streams = config.streams()
     return {
         "version": __version__,
-        "streams": config.streams(),
+        "sources": config.sources(),
         "sessions": sessions.all(),
         "settings": config.settings(),
+        "summary": _summary(streams),
     }
+
+
+@app.get("/api/channels")
+def channels(
+    q: str = "",
+    source_id: str = "",
+    group: str = "",
+    selected: str = "",
+    epg: str = "",
+    missing: str = "",
+):
+    items = config.streams()
+    needle = q.strip().casefold()
+    if needle:
+        items = [x for x in items if needle in " ".join([
+            str(x.get("name") or ""), str(x.get("tvg_id") or ""), str(x.get("channel_number") or ""),
+            str(x.get("group_title") or ""), str(x.get("source_id") or "")
+        ]).casefold()]
+    if source_id:
+        items = [x for x in items if str(x.get("source_id") or "") == source_id]
+    if group:
+        items = [x for x in items if str(x.get("group_title") or "") == group]
+    if selected in {"true", "false"}:
+        want = selected == "true"
+        items = [x for x in items if bool(x.get("selected", x.get("enabled", True))) == want]
+    if epg in {"true", "false"}:
+        want = epg == "true"
+        items = [x for x in items if bool(x.get("epg_matched")) == want]
+    if missing in {"true", "false"}:
+        want = missing == "true"
+        items = [x for x in items if bool(x.get("missing")) == want]
+    items.sort(key=lambda x: (str(x.get("group_title") or "").casefold(), str(x.get("channel_number") or "").zfill(8), str(x.get("name") or "").casefold()))
+    return {
+        "items": items,
+        "count": len(items),
+        "groups": sorted({str(x.get("group_title") or "") for x in config.streams() if str(x.get("group_title") or "")}),
+    }
+
+
+@app.post("/api/sources")
+def save_source(body: SourceIn):
+    try:
+        return config.upsert_source(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/sources/{source_id}/refresh")
+def refresh_source(source_id: str):
+    try:
+        stats = sources.refresh(source_id)
+        return {"ok": True, **stats}
+    except KeyError:
+        raise HTTPException(404, "Unknown source")
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.delete("/api/sources/{source_id}")
+def delete_source(source_id: str, delete_channels: bool = True):
+    config.delete_source(source_id, delete_channels=delete_channels)
+    guide.invalidate()
+    return {"ok": True}
+
+
+@app.post("/api/channels/select")
+def select_channels(body: SelectionIn):
+    count = config.set_selected(body.ids, body.selected)
+    guide.invalidate()
+    return {"ok": True, "updated": count}
+
+
+@app.patch("/api/channels/{sid}")
+def patch_channel(sid: str, body: ChannelPatch):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "play_profile" in fields and fields["play_profile"] not in HLS_PROFILES:
+        raise HTTPException(400, "Unknown HLS profile")
+    saved = config.update_stream_fields(sid, **fields)
+    if not saved:
+        raise HTTPException(404, "Unknown channel")
+    guide.invalidate()
+    return saved
 
 
 @app.get("/playlist.m3u")
 def jellyfin_playlist(request: Request):
     payload = build_m3u(config.streams(), str(request.base_url).rstrip("/"))
-    return Response(
-        payload,
-        media_type="audio/x-mpegurl",
-        headers={"Cache-Control": "no-cache", "Content-Disposition": 'inline; filename="stream-lab.m3u"'},
-    )
+    return Response(payload, media_type="audio/x-mpegurl", headers={"Cache-Control": "no-cache", "Content-Disposition": 'inline; filename="stream-lab.m3u"'})
 
 
 @app.get("/guide.xml")
 def jellyfin_guide():
     payload = guide.xml()
-    return Response(
-        payload,
-        media_type="application/xml",
-        headers={"Cache-Control": "no-cache", "Content-Disposition": 'inline; filename="stream-lab.xml"'},
-    )
+    return Response(payload, media_type="application/xml", headers={"Cache-Control": "no-cache", "Content-Disposition": 'inline; filename="stream-lab.xml"'})
 
 
 @app.get("/api/guide/status")
@@ -98,6 +226,7 @@ def guide_refresh():
     return {"ok": True, "bytes": len(payload), **guide.status()}
 
 
+# Manual-stream API retained for one-off diagnostics and backwards compatibility.
 @app.post("/api/streams")
 def save_stream(body: StreamIn):
     try:
@@ -145,7 +274,7 @@ def events(session_id: str):
     p = SESSIONS / session_id / "events.jsonl"
     if not p.exists():
         raise HTTPException(404, "No events")
-    return Response(p.read_text(), media_type="application/x-ndjson")
+    return Response(p.read_text(encoding="utf-8"), media_type="application/x-ndjson")
 
 
 @app.get("/api/streams/{sid}/probe")
@@ -153,10 +282,7 @@ def probe(sid: str):
     s = config.stream(sid)
     if not s:
         raise HTTPException(404, "Unknown stream")
-    cmd = [
-        str(config.settings().get("ffprobe_path", "ffprobe")),
-        "-v", "error", "-show_streams", "-show_format", "-of", "json",
-    ]
+    cmd = [str(config.settings().get("ffprobe_path", "ffprobe")), "-v", "error", "-show_streams", "-show_format", "-of", "json"]
     if s.get("user_agent"):
         cmd += ["-user_agent", s["user_agent"]]
     cmd += [s["input_url"]]
@@ -172,7 +298,9 @@ async def hls_playlist(sid: str):
     s = config.stream(sid)
     if not s:
         raise HTTPException(404, "Unknown stream")
-    profile = s.get("play_profile", "normalize-hls")
+    if s.get("missing"):
+        raise HTTPException(410, "Channel is currently missing from its upstream source")
+    profile = s.get("play_profile", "normalize-hls-permissive")
     if profile not in HLS_PROFILES:
         raise HTTPException(400, "play_profile must be an HLS profile")
     rt = sessions.latest_hls(sid, profile)
@@ -180,11 +308,7 @@ async def hls_playlist(sid: str):
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         if p.exists():
-            return Response(
-                p.read_text(errors="replace"),
-                media_type="application/vnd.apple.mpegurl",
-                headers={"Cache-Control": "no-store", "X-Stream-Lab-Session": rt.session_id},
-            )
+            return Response(p.read_text(errors="replace"), media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store", "X-Stream-Lab-Session": rt.session_id})
         if rt.proc and rt.proc.poll() is not None:
             raise HTTPException(502, "FFmpeg exited before producing HLS")
         await asyncio.sleep(0.2)
@@ -198,7 +322,6 @@ def _ts_response(sid: str, *, permissive: bool) -> StreamingResponse:
         raise HTTPException(404, "Unknown stream")
     except Exception as exc:
         raise HTTPException(500, str(exc))
-
     proc = rt.proc
     assert proc is not None and proc.stdout is not None
 
@@ -212,15 +335,7 @@ def _ts_response(sid: str, *, permissive: bool) -> StreamingResponse:
         finally:
             sessions.stop(rt.session_id, reason="client_disconnect_or_eof")
 
-    return StreamingResponse(
-        gen(),
-        media_type="video/mp2t",
-        headers={
-            "Cache-Control": "no-store",
-            "X-Stream-Lab-Session": rt.session_id,
-            "X-Stream-Lab-Profile": rt.profile,
-        },
-    )
+    return StreamingResponse(gen(), media_type="video/mp2t", headers={"Cache-Control": "no-store", "X-Stream-Lab-Session": rt.session_id, "X-Stream-Lab-Profile": rt.profile})
 
 
 @app.get("/stream/{sid}/stream.ts")
@@ -240,8 +355,9 @@ def hls_segment(sid: str, filename: str):
     s = config.stream(sid)
     if not s:
         raise HTTPException(404, "Unknown stream")
-    profile = s.get("play_profile", "normalize-hls")
+    profile = s.get("play_profile", "normalize-hls-permissive")
     rt = sessions.latest_hls(sid, profile)
+    rt.last_client_access = time.time()
     p = rt.root / "output" / filename
     if not p.exists():
         raise HTTPException(404, "Segment not found")

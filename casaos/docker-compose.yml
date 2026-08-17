@@ -24,14 +24,14 @@ x-casaos:
   tagline:
     en_US: Diagnostic and stabilization proxy for Samsung TV Plus and FAST HLS streams.
   description:
-    en_US: Samsung TV Plus Stream Lab normalizes troublesome FAST/SSAI HLS streams for Jellyfin while preserving detailed diagnostics.
+    en_US: Import full M3U/XMLTV sources, select the channels you want, and route selected FAST/SSAI streams through Stream Lab stabilization before Jellyfin.
   icon: https://raw.githubusercontent.com/Kody-R/samsung-tvplus-stream-lab/main/samsung-tvplus-stream-lab-icon.svg
   author: Kody-R
   developer: Kody-R
   category: Media
   architectures:
     - amd64
-  version: "0.1.2"
+  version: "0.2.0"
   update_at: "2026-08-17"
   repo: https://github.com/Kody-R/samsung-tvplus-stream-lab
   website: https://github.com/Kody-R/samsung-tvplus-stream-lab

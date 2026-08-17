@@ -1,15 +1,84 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Samsung TV Plus Stream Lab</title><link rel="stylesheet" href="/static/style.css?v={{ version }}"></head><body>
-<header><div><h1>Samsung TV Plus Stream Lab</h1><p>v{{ version }} · isolated IPTV/FFmpeg troubleshooting container</p></div><button onclick="loadAll()">Refresh</button></header>
-<nav><button class="tab active" data-tab="streams">Streams</button><button class="tab" data-tab="sessions">Test Sessions</button><button class="tab" data-tab="help">Jellyfin & Workflow</button></nav>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Samsung TV Plus Stream Lab</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ version }}">
+</head>
+<body>
+<header>
+  <div><h1>Samsung TV Plus Stream Lab</h1><p>v{{ version }} · selective IPTV stabilization gateway</p></div>
+  <button onclick="loadAll()">Refresh</button>
+</header>
+<nav>
+  <button class="tab active" data-tab="dashboard">Dashboard</button>
+  <button class="tab" data-tab="sources">Sources</button>
+  <button class="tab" data-tab="channels">Channels</button>
+  <button class="tab" data-tab="jellyfin">Jellyfin</button>
+  <button class="tab" data-tab="sessions">Diagnostics</button>
+</nav>
 <main>
-<section id="streams" class="pane active">
-<div class="panel integration"><h2>Jellyfin Integration</h2><p>These endpoints are generated automatically from all enabled Stream Lab streams.</p><div class="integration-grid"><div><b>M3U Tuner URL</b><div class="urlrow"><code id="playlistUrl"></code><button id="copyPlaylist" type="button">Copy</button></div></div><div><b>XMLTV Guide URL</b><div class="urlrow"><code id="guideUrl"></code><button id="copyGuide" type="button">Copy</button></div></div></div><div class="guide-row"><span id="guideStatus">Guide has not been generated yet.</span><button type="button" onclick="refreshGuide()">Refresh Guide Now</button></div></div>
-<div class="panel"><h2>Add / Edit Test Stream</h2><form id="streamForm">
-<label>ID<input name="id" placeholder="1" required></label><label>Name<input name="name" placeholder="A&E Alaska State Troopers"></label><label>Jellyfin HLS profile<select name="play_profile"><option value="normalize-hls">Normalized HLS Remux</option><option value="normalize-hls-permissive" selected>Normalized HLS — Permissive</option><option value="transcode-hls">Software HLS Transcode</option><option value="transcode-hls-permissive">Software HLS — Permissive</option><option value="vaapi-hls">VAAPI HLS Transcode</option><option value="qsv-hls">QSV HLS Transcode</option></select></label>
-<label class="full">Input URL<input name="input_url" placeholder="https://jmp2.uk/... or any HLS URL" required></label>
-<details class="full"><summary>Jellyfin / guide metadata (optional)</summary><div class="metadata-grid"><label>tvg-id<input name="tvg_id" placeholder="defaults to Stream ID"></label><label>Channel number<input name="channel_number" placeholder="139"></label><label>Group title<input name="group_title" placeholder="Stream Lab"></label><label>Logo URL<input name="tvg_logo" placeholder="https://..."></label><label class="span2">XMLTV source URL<input name="xmltv_url" placeholder="https://provider.example/guide.xml or guide.xml.gz"></label><label class="span2">XMLTV channel ID<input name="xmltv_channel_id" placeholder="defaults to tvg-id"></label></div></details>
-<button>Save Stream</button></form></div>
-<div class="notice"><b>v0.1.2:</b> Jellyfin-ready <code>/playlist.m3u</code> and <code>/guide.xml</code> are generated automatically. XMLTV sources are filtered to only configured channels and cached for 15 minutes by default. Static assets now use versioned URLs to avoid browser-cache mismatches after upgrades.</div><div id="streamCards" class="cards"></div></section>
-<section id="sessions" class="pane"><div class="panel"><h2>Diagnostic Sessions</h2><p>Sessions never auto-restart. Continuous TS viewers appear here too, with FFmpeg logs, progress, master/variant snapshots and downloadable bundles.</p><div id="sessionTable"></div></div></section>
-<section id="help" class="pane"><div class="panel"><h2>Jellyfin setup</h2><ol><li>In Jellyfin, add an <b>M3U Tuner</b> using the Stream Lab <code>/playlist.m3u</code> URL shown on the Streams tab.</li><li>Add an <b>XMLTV guide data provider</b> using the Stream Lab <code>/guide.xml</code> URL.</li><li>For real programme listings, configure each stream with an XMLTV source URL and the channel ID used by that source. Streams without XMLTV still receive a valid channel entry in the generated guide.</li><li>Keep the stream playback profile on <b>Normalized HLS — Permissive</b> for the Samsung SSAI test path.</li></ol><h2>Isolation workflow</h2><ol><li>Use the direct Samsung/FAST media URL when possible.</li><li>Run <b>Copy → Null · Permissive</b> to validate input acceptance.</li><li>Run <b>Normalized HLS · Permissive</b> through SSAI transitions.</li><li>Let Jellyfin consume the generated M3U and XMLTV endpoints.</li><li>If playback freezes, leave Stream Lab running, test the same HLS URL in VLC, then download the session bundle.</li></ol></div></section>
-</main><div id="toast"></div><script src="/static/app.js?v={{ version }}"></script></body></html>
+<section id="dashboard" class="pane active">
+  <div class="hero panel">
+    <div><h2>Import everything. Stabilize only what you use.</h2><p>Feed Stream Lab a complete M3U + XMLTV source, select the channels you want, and Jellyfin receives a filtered playlist whose streams pass through the proven permissive normalization layer.</p></div>
+    <div class="flow">Provider M3U/XMLTV → Channel Selector → Stream Lab → Jellyfin</div>
+  </div>
+  <div id="summaryCards" class="summary-grid"></div>
+  <div class="panel"><h2>How v0.2.0 works</h2><ol><li>Add a full playlist and optional XMLTV guide on <b>Sources</b>.</li><li>Refresh it. New channels are imported but remain unselected.</li><li>Use <b>Channels</b> to search/filter and select only what Jellyfin should receive.</li><li>Selected channels default to <b>Normalized HLS · Permissive</b>.</li><li>FFmpeg starts on demand when Jellyfin opens a channel, then stops after the HLS relay goes idle.</li></ol></div>
+</section>
+
+<section id="sources" class="pane">
+  <div class="panel">
+    <h2>Add / Edit Source</h2>
+    <form id="sourceForm" class="source-form">
+      <label>Source ID<input name="id" placeholder="samsung-tv-plus" required></label>
+      <label>Name<input name="name" placeholder="Samsung TV Plus"></label>
+      <label class="span2">Full M3U URL<input name="m3u_url" placeholder="https://provider.example/playlist.m3u" required></label>
+      <label class="span2">Full XMLTV URL<input name="xmltv_url" placeholder="https://provider.example/guide.xml or guide.xml.gz"></label>
+      <label>Default processing<select name="default_profile"><option value="normalize-hls-permissive" selected>Normalized HLS · Permissive</option><option value="transcode-hls-permissive">Software HLS · Permissive</option><option value="normalize-hls">Normalized HLS</option><option value="transcode-hls">Software HLS</option></select></label>
+      <label>Refresh every<input name="refresh_hours" type="number" min="1" max="168" value="6"><span class="suffix">hours</span></label>
+      <details class="span2"><summary>Advanced</summary><label>User Agent<input name="user_agent" placeholder="Browser-style User-Agent"></label></details>
+      <div class="span2 actions"><button type="submit">Save Source</button><button type="button" class="secondary" onclick="resetSourceForm()">Clear</button></div>
+    </form>
+  </div>
+  <div id="sourceCards" class="cards"></div>
+</section>
+
+<section id="channels" class="pane">
+  <div class="panel">
+    <div class="channel-head"><div><h2>Channel Manager</h2><p id="channelCount">0 channels</p></div><button onclick="loadChannels()">Refresh Channels</button></div>
+    <div class="filters">
+      <input id="channelSearch" placeholder="Search name, tvg-id, number, group...">
+      <select id="sourceFilter"><option value="">All sources</option></select>
+      <select id="groupFilter"><option value="">All groups</option></select>
+      <select id="selectedFilter"><option value="">Selected + unselected</option><option value="true">Selected only</option><option value="false">Unselected only</option></select>
+      <select id="epgFilter"><option value="">EPG: any</option><option value="true">Has EPG match</option><option value="false">Missing EPG</option></select>
+      <select id="missingFilter"><option value="false">Current channels</option><option value="">Current + missing</option><option value="true">Missing upstream only</option></select>
+    </div>
+    <div class="bulkbar"><button class="permissive" onclick="bulkVisible(true)">Select filtered</button><button onclick="bulkVisible(false)">Deselect filtered</button><span>Bulk actions affect the currently filtered result set.</span></div>
+    <div id="channelTable"></div>
+  </div>
+</section>
+
+<section id="jellyfin" class="pane">
+  <div class="panel integration">
+    <h2>Jellyfin Integration</h2>
+    <p>These URLs always represent the current channel selection. No hand-written playlist is required.</p>
+    <div class="integration-grid">
+      <div><b>M3U Tuner URL</b><div class="urlrow"><code id="playlistUrl"></code><button id="copyPlaylist">Copy</button></div></div>
+      <div><b>XMLTV Guide URL</b><div class="urlrow"><code id="guideUrl"></code><button id="copyGuide">Copy</button></div></div>
+    </div>
+    <div class="guide-row"><span id="guideStatus">Guide has not been generated yet.</span><button onclick="refreshGuide()">Refresh Guide Now</button></div>
+  </div>
+  <div class="panel"><h2>Jellyfin setup</h2><ol><li>Add an <b>M3U Tuner</b> using <code>/playlist.m3u</code>.</li><li>Add an <b>XMLTV</b> guide data provider using <code>/guide.xml</code>.</li><li>Refresh Jellyfin Live TV channels and guide data after changing your selection.</li></ol><p>Only selected, currently-present channels are exported. Their original provider URLs are replaced with Stream Lab HLS URLs.</p></div>
+</section>
+
+<section id="sessions" class="pane">
+  <div class="panel"><h2>Diagnostic / Relay Sessions</h2><p>Manual tests remain fully instrumented. Jellyfin HLS relays are marked as managed and stop automatically after the configured idle timeout.</p><div id="sessionTable"></div></div>
+</section>
+</main>
+<div id="toast"></div>
+<script src="/static/app.js?v={{ version }}"></script>
+</body>
+</html>

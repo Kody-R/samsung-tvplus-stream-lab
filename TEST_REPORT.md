@@ -1,61 +1,63 @@
-# Samsung TV Plus Stream Lab v0.1.2 Test Report
+# Samsung TV Plus Stream Lab v0.2.0 Test Report
 
 Build date: 2026-08-17
 
-## Automated checks
+## Static / unit checks
 
 - Python compile: PASS
-- Pytest: 10/10 PASS
+- Pytest: 14/14 PASS
 - JavaScript syntax (`node --check`): PASS
-- `docker-compose.yml` YAML parse: PASS
-- `docker-compose.dev.yml` YAML parse: PASS
-- `docker-compose.hw.yml` YAML parse: PASS
-- `casaos/docker-compose.yml` YAML parse: PASS
-- GitHub Actions workflow YAML parse: PASS
+- YAML parse: PASS
+  - `docker-compose.yml`
+  - `docker-compose.dev.yml`
+  - `docker-compose.hw.yml`
+  - `casaos/docker-compose.yml`
+  - `.github/workflows/docker-publish.yml`
 
-## M3U generation
-
-PASS:
-
-- Emits `#EXTM3U`.
-- Includes configured `tvg-id`, `tvg-name`, `tvg-logo`, `group-title`, and `tvg-chno` metadata when available.
-- Points each enabled channel to `/stream/<id>/index.m3u8` on the same host used to request the playlist.
-
-## XMLTV generation
+## Source importer tests
 
 PASS:
 
-- Creates a valid XML declaration and `<tv>` document.
-- Creates a channel record even when no XMLTV provider is configured.
-- Fetches configured XMLTV sources once per unique source URL per refresh.
-- Filters out unrelated channels/programmes.
-- Remaps upstream programme `channel=` IDs to Stream Lab's generated `tvg-id`.
-- Supports raw `.xml` and gzip-compressed XMLTV payloads.
-- Keeps provider fetch errors isolated so one unavailable guide source does not invalidate the entire generated guide.
+- Parses full extended M3U metadata (`tvg-id`, logo, group, channel number, name, URL).
+- Resolves relative stream URLs against the playlist URL.
+- Reads XMLTV channel IDs.
+- Builds a normalized XMLTV display-name index for fallback guide matching.
+- Exported M3U contains only selected, currently-present channels.
+- Missing/unselected channels are excluded.
 
-## End-to-end API smoke test
+## End-to-end provider refresh test
 
-A temporary HTTP XMLTV provider and v0.1.2 FastAPI server were started locally.
+A temporary local HTTP provider served a two-channel M3U and XMLTV guide.
 
-Configured test channel:
+Initial import:
 
-```text
-A&E Alaska State Troopers
-Stream ID: 2
-tvg-id: stvp-US1900023QQ
-XMLTV source ID: provider.ae
-```
+- 2 channels imported.
+- Both new channels defaulted to unselected.
+- 2 XMLTV IDs matched.
+- One channel was selected through the API.
+- `/playlist.m3u` exported only the selected channel.
+- `/guide.xml` retained only the selected channel's programme data.
 
-Observed:
+The provider was then changed:
 
-- `/playlist.m3u` contained exactly the Stream Lab HLS URL.
-- `/guide.xml` contained the configured Stream Lab channel.
-- The matching Alaska State Troopers programme was included.
-- An unrelated provider programme was excluded.
-- `/api/guide/status` reported 1 channel / 1 programme / 0 errors.
+- selected channel stream URL changed;
+- second channel disappeared;
+- a new third channel appeared.
 
-Result: PASS.
+Refresh result:
 
-## Live Samsung regression status
+- 2 current upstream channels
+- 1 new
+- 1 removed/missing
+- 1 URL change
+- selected channel remained selected
+- selected channel adopted the new upstream URL
+- missing channel remained remembered and marked Missing
+- new channel remained unselected
+- exported M3U still contained only the selected current channel
 
-v0.1.2 does not modify the FFmpeg stabilization code proven in v0.1.1. The previously successful live `copy-null-permissive` and `normalize-hls-permissive` behavior is preserved unchanged.
+PASS.
+
+## Docker build limitation
+
+The build environment does not provide the Docker CLI/daemon, so an actual container image build could not be executed here. Dockerfile/Compose syntax and the application itself were validated independently. GitHub Actions is configured to perform the GHCR Docker build on push.

@@ -110,6 +110,8 @@ class Runtime:
     last_progress: float = field(default_factory=time.time)
     freeze_logged: bool = False
     monitor_stop: threading.Event = field(default_factory=threading.Event)
+    managed_relay: bool = False
+    last_client_access: float = field(default_factory=time.time)
 
     def status(self) -> dict[str, Any]:
         return {
@@ -122,6 +124,8 @@ class Runtime:
             "out_time_ms": self.out_time_ms,
             "progress_age": round(time.time() - self.last_progress, 2),
             "path": str(self.root),
+            "managed_relay": self.managed_relay,
+            "client_age": round(time.time() - self.last_client_access, 2),
         }
 
 
@@ -130,6 +134,7 @@ class SessionManager:
         self.config = config
         self.lock = threading.RLock()
         self.runtimes: dict[str, Runtime] = {}
+        threading.Thread(target=self._reaper, daemon=True, name="hls-relay-reaper").start()
 
     def _prepare(self, sid: str, profile: str, stream: dict, cmd: list[str]) -> Runtime:
         stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -155,7 +160,7 @@ class SessionManager:
         event(root / "events.jsonl", "session_start", profile=profile, command=shell_join(cmd))
         return rt
 
-    def start(self, sid: str, profile: str) -> Runtime:
+    def start(self, sid: str, profile: str, *, managed_relay: bool = False) -> Runtime:
         stream = self.config.stream(sid)
         if not stream:
             raise KeyError(sid)
@@ -188,7 +193,7 @@ class SessionManager:
             bufsize=1,
             start_new_session=True,
         )
-        rt = Runtime(session_id, sid, profile, root, proc)
+        rt = Runtime(session_id, sid, profile, root, proc, managed_relay=managed_relay)
         self.runtimes[session_id] = rt
         event(root / "events.jsonl", "session_start", profile=profile, command=shell_join(cmd))
         threading.Thread(target=self._progress, args=(rt,), daemon=True).start()
@@ -408,9 +413,31 @@ class SessionManager:
         with self.lock:
             candidates = [
                 r for r in self.runtimes.values()
-                if r.stream_id == sid and r.profile == profile and r.proc and r.proc.poll() is None
+                if r.stream_id == sid and r.profile == profile and r.proc and r.proc.poll() is None and r.managed_relay
             ]
-            return max(candidates, key=lambda x: x.started) if candidates else self.start(sid, profile)
+            rt = max(candidates, key=lambda x: x.started) if candidates else self.start(sid, profile, managed_relay=True)
+            rt.last_client_access = time.time()
+            return rt
+
+    def touch_client(self, sid: str, profile: str) -> None:
+        with self.lock:
+            candidates = [
+                r for r in self.runtimes.values()
+                if r.stream_id == sid and r.profile == profile and r.proc and r.proc.poll() is None and r.managed_relay
+            ]
+            if candidates:
+                max(candidates, key=lambda x: x.started).last_client_access = time.time()
+
+    def _reaper(self) -> None:
+        while True:
+            time.sleep(5)
+            timeout = max(10.0, float(self.config.settings().get("hls_idle_timeout_seconds", 30)))
+            now = time.time()
+            for rt in list(self.runtimes.values()):
+                if not rt.managed_relay or not rt.proc or rt.proc.poll() is not None:
+                    continue
+                if now - rt.last_client_access > timeout:
+                    self.stop(rt.session_id, reason="hls_idle_timeout")
 
     def all(self) -> list[dict[str, Any]]:
         return sorted(
