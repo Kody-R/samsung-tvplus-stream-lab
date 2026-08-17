@@ -1,17 +1,73 @@
+name: samsung-tvplus-stream-lab
+
 services:
   samsung-stream-lab:
-    build:
-      context: ..
-      args:
-        VERSION: 0.1.1
-    image: samsung-tvplus-stream-lab:0.1.1
+    image: ghcr.io/kody-r/samsung-tvplus-stream-lab:latest
+    pull_policy: always
+
     container_name: samsung-stream-lab
     restart: unless-stopped
+
+    network_mode: bridge
+
     ports:
-      - "8091:8091"
+      - target: 8091
+        published: "8091"
+        protocol: tcp
+
     environment:
       TZ: America/Chicago
+
     volumes:
-      - ../data:/app/data
-    devices:
-      - /dev/dri:/dev/dri
+      - type: bind
+        source: /DATA/AppData/samsung-tvplus-stream-lab/data
+        target: /app/data
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+x-casaos:
+  id: com.github.kody-r.samsung-tvplus-stream-lab
+  main: samsung-stream-lab
+  index: /
+  port_map: "8091"
+  scheme: http
+
+  title:
+    en_US: Samsung TV Plus Stream Lab
+
+  tagline:
+    en_US: Diagnostic and stabilization proxy for Samsung TV Plus and FAST HLS streams.
+
+  description:
+    en_US: >-
+      Samsung TV Plus Stream Lab provides diagnostic, normalized HLS,
+      permissive HLS, software transcoding, and continuous MPEG-TS
+      test paths for Samsung TV Plus, FAST, and SSAI streams.
+
+  icon: https://raw.githubusercontent.com/kody-r/samsung-tvplus-stream-lab/main/icon.png
+
+  author: kody-r
+  developer: kody-r
+
+  category: Media
+
+  architectures:
+    - amd64
+
+  version: "0.1.1"
+  update_at: "2026-08-17"
+
+  repo: https://github.com/kody-r/samsung-tvplus-stream-lab
+  website: https://github.com/kody-r/samsung-tvplus-stream-lab
+  support: https://github.com/kody-r/samsung-tvplus-stream-lab/issues
+
+  release_notes:
+    en_US: >-
+      v0.1.1 adds permissive HLS handling, instrumented Continuous TS,
+      child/variant manifest monitoring, and improved diagnostic sessions.
