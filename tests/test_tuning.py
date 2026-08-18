@@ -31,12 +31,21 @@ def test_custom_tuning_persists(tmp_path: Path, monkeypatch):
         av_sync_warn_seconds=0.75,
         audio_sync_bitrate_kbps=192,
         hls_idle_timeout_seconds=45,
+        variant_pin_enabled=True,
+        variant_quality="720p",
+        auto_recovery_enabled=True,
+        av_sync_recovery_samples=2,
+        recovery_stall_seconds=25,
+        ssai_capture_enabled=True,
     )
     assert settings["dts_delta_threshold"] == 90.5
     assert settings["dts_delta_threshold_user_set"] is True
     reloaded = config_mod.ConfigStore()
     assert reloaded.settings()["dts_delta_threshold"] == 90.5
     assert reloaded.settings()["av_sync_probe_seconds"] == 20
+    assert reloaded.settings()["variant_quality"] == "720p"
+    assert reloaded.settings()["auto_recovery_enabled"] is True
+    assert reloaded.settings()["recovery_stall_seconds"] == 25
 
 
 def test_av_sync_sampler_records_offset(tmp_path: Path, monkeypatch):

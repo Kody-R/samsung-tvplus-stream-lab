@@ -61,7 +61,7 @@ def build(profile: str, stream: dict, settings: dict, out_dir: Path) -> list[str
             "-hwaccel_output_format", "vaapi",
         ]
 
-    cmd += ["-i", str(stream["input_url"]), "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]
+    cmd += ["-i", str(stream.get("resolved_input_url") or stream["input_url"]), "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]
 
     if base in {"copy-null", "ts-null"}:
         cmd += ["-c", "copy", "-f", "null", "-"]
@@ -123,7 +123,7 @@ def build_ts_relay(stream: dict, settings: dict, *, permissive: bool = False) ->
     if permissive:
         cmd += ["-extension_picky", "0"]
     cmd += [
-        "-i", str(stream["input_url"]),
+        "-i", str(stream.get("resolved_input_url") or stream["input_url"]),
         "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
         "-c", "copy", "-f", "mpegts", "pipe:1",
     ]

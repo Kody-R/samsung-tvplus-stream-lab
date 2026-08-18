@@ -1,16 +1,65 @@
-# Samsung TV Plus Stream Lab v0.2.2 Test Report
+# Samsung TV Plus Stream Lab v0.2.3 Test Report
 
 ## Automated tests
 
 ```text
-20 passed
+24 passed
 ```
 
-Coverage includes the v0.2 source importer/channel selector, v0.2.1 interleaved XMLTV regression, configurable DTS threshold command generation, legacy threshold migration, tuning persistence, the new audio-sync HLS profile, and A/V sync sampling state.
+Coverage includes:
+
+- M3U source import and filtered Jellyfin exports
+- interleaved XMLTV regression
+- configurable DTS threshold and persistence
+- hybrid H.264-copy/AAC-sync profile
+- A/V output sampling
+- Samsung-style master-playlist variant parsing
+- Best/720p/540p/360p rendition selection
+- SSAI/discontinuity boundary parsing
+- generation-specific HLS segment rewriting
+- monotonically rebased media sequence values
+- warm recovery promotion of a ready replacement generation
+
+## Actual Samsung diagnostic-master validation
+
+The master playlist preserved in the supplied v0.2.2 diagnostic bundle was parsed directly:
+
+```text
+640x360   bandwidth  921600
+960x540   bandwidth 2048000
+1280x720  bandwidth 3072000
+```
+
+Result:
+
+```text
+Best available -> 1280x720 / 3072000
+```
+
+An actual captured media playlist containing `#EXT-X-DISCONTINUITY` was also parsed successfully and a concrete transition boundary was identified.
+
+## Local end-to-end rendition smoke test
+
+A local HTTP HLS source was created with a three-rendition master. Stream Lab resolved the master before launching FFmpeg:
+
+```text
+requested: http://127.0.0.1:18091/master.m3u8
+resolved:  http://127.0.0.1:18091/2.m3u8
+quality:   Best available / 720p child
+```
+
+`normalize-hls-sync-permissive` then consumed the resolved media playlist and generated local HLS successfully:
+
+```text
+FFmpeg return code: 0
+local index.m3u8:   generated
+local TS output:    generated
+```
 
 ## Static validation
 
 - Python `compileall`: PASS
+- App import / FastAPI route smoke test: PASS
 - Browser JavaScript `node --check`: PASS
 - `docker-compose.yml`: YAML PASS
 - `docker-compose.dev.yml`: YAML PASS
@@ -18,61 +67,17 @@ Coverage includes the v0.2 source importer/channel selector, v0.2.1 interleaved 
 - `casaos/docker-compose.yml`: YAML PASS
 - `.github/workflows/docker-publish.yml`: YAML PASS
 
-## DTS tuning validation
+## Docker validation
 
-A simulated v0.2.1 data file containing the old hard-coded `dts_delta_threshold: 1.0` was loaded by v0.2.2:
+A Docker daemon/CLI is not available in this build environment, so the Docker image itself could not be built here. The included GitHub Actions workflow remains the production image-build validation path.
 
-```text
-migrated threshold: 60.0 seconds
-```
+## Production validation still required
 
-A custom value was then saved and reloaded:
+The following require the live CasaOS/Samsung environment:
 
-```text
-saved threshold:    90.5 seconds
-reloaded threshold: 90.5 seconds
-```
-
-The API smoke test successfully saved a custom `120.25` second threshold and returned it through `/api/status`.
-
-## FFmpeg profile smoke test
-
-The new `normalize-hls-sync-permissive` profile was run against a locally generated H.264/AAC HLS input using FFmpeg 7.1.5.
-
-Result:
-
-```text
-return code: 0
-video codec: stream-copy H.264
-audio codec: AAC 160k
-audio filter: aresample=async=1:first_pts=0
-DTS threshold: 60.0
-output HLS: generated successfully
-```
-
-The generated command placed both `-dts_delta_threshold` and permissive `-extension_picky 0` before the input.
-
-## A/V sync probe smoke test
-
-The v0.2.2 ffprobe sampler inspected a generated output TS segment and measured:
-
-```text
-A/V offset: -0.043 seconds
-status: healthy
-```
-
-The unit-level sampler test also validates threshold comparison/event state with a synthetic 0.125-second offset.
-
-## Provider compatibility regression
-
-The v0.2.1 XMLTV interleaving fix remains in the test suite. The supplied provider M3U still parses as 514 channels. After removing the browser XML-viewer display sentence and restoring XML escaping in the pasted browser copy solely for structural validation, the supplied guide contains 579 channel IDs and all 514 M3U `tvg-id` values are present.
-
-## Hardware / production validation still required
-
-The build environment does not provide Docker/CasaOS or the user's live Samsung feed. The following remain production tests:
-
-- GHCR Docker image build in GitHub Actions
-- CasaOS upgrade using the persistent data directory
-- Long-duration Samsung playback at DTS thresholds such as 30, 60, 90, and 120 seconds
-- Comparison of `normalize-hls-permissive` versus `normalize-hls-sync-permissive`
-- A/V offset behavior through multiple real SSAI ad/discontinuity transitions
+- GHCR image build and pull
+- long-duration 720p-pinned Samsung playback across multiple SSAI transitions
+- automatic recovery after a real A/V-desync event
+- client behavior during a warm recovery handoff
+- captured raw SSAI transition segments from the live provider
+- comparison of 60-second vs 120-second DTS thresholds with variant pinning enabled

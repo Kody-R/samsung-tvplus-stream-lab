@@ -175,7 +175,7 @@ class SourceService:
                 if str(x.get("source_id") or "") == str(source_id)
             }
             now_utc = utc()
-            default_profile = str(source.get("default_profile") or "normalize-hls-permissive")
+            default_profile = str(source.get("default_profile") or "normalize-hls-sync-permissive")
             imported: list[dict[str, Any]] = []
             seen_keys: set[str] = set()
             new_count = 0

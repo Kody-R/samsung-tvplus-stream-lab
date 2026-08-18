@@ -16,16 +16,17 @@
   <button class="tab" data-tab="sources">Sources</button>
   <button class="tab" data-tab="channels">Channels</button>
   <button class="tab" data-tab="jellyfin">Jellyfin</button>
+  <button class="tab" data-tab="protection">Protection</button>
   <button class="tab" data-tab="sessions">Diagnostics</button>
 </nav>
 <main>
 <section id="dashboard" class="pane active">
   <div class="hero panel">
-    <div><h2>Import everything. Stabilize only what you use.</h2><p>Feed Stream Lab a complete M3U + XMLTV source, select the channels you want, and Jellyfin receives a filtered playlist whose streams pass through the proven permissive normalization layer.</p></div>
-    <div class="flow">Provider M3U/XMLTV → Channel Selector → Stream Lab → Jellyfin</div>
+    <div><h2>Import everything. Stabilize only what you use.</h2><p>Import a complete M3U + XMLTV source, select the channels you want, and route those channels through a protected local HLS relay before Jellyfin.</p></div>
+    <div class="flow">Provider → Stream Lab Protection → Jellyfin</div>
   </div>
   <div id="summaryCards" class="summary-grid"></div>
-  <div class="panel"><h2>How v0.2.2 works</h2><ol><li>Add a full playlist and optional XMLTV guide on <b>Sources</b>.</li><li>Refresh it. New channels are imported but remain unselected.</li><li>Use <b>Channels</b> to search/filter and select only what Jellyfin should receive.</li><li>Selected channels default to <b>Normalized HLS · Permissive</b>.</li><li>FFmpeg starts on demand when Jellyfin opens a channel, then stops after the HLS relay goes idle.</li></ol></div>
+  <div class="panel"><h2>v0.2.3 workflow</h2><ol><li>Add your provider on <b>Sources</b>.</li><li>Select only the channels you want on <b>Channels</b>.</li><li>Use <b>Protection</b> to pin one HLS rendition, tune timestamp handling, and enable automatic recovery.</li><li>Point Jellyfin at the two permanent URLs on <b>Jellyfin</b>.</li><li>Use <b>Diagnostics</b> only when you need session bundles or SSAI evidence.</li></ol></div>
 </section>
 
 <section id="sources" class="pane">
@@ -36,7 +37,7 @@
       <label>Name<input name="name" placeholder="Samsung TV Plus"></label>
       <label class="span2">Full M3U URL<input name="m3u_url" placeholder="https://provider.example/playlist.m3u" required></label>
       <label class="span2">Full XMLTV URL<input name="xmltv_url" placeholder="https://provider.example/guide.xml or guide.xml.gz"></label>
-      <label>Default processing<select name="default_profile"><option value="normalize-hls-permissive" selected>Normalized HLS · Permissive</option><option value="normalize-hls-sync-permissive">Normalized + Audio Sync · Permissive</option><option value="transcode-hls-permissive">Software HLS · Permissive</option><option value="normalize-hls">Normalized HLS</option><option value="normalize-hls-sync">Normalized + Audio Sync</option><option value="transcode-hls">Software HLS</option></select></label>
+      <label>Default processing<select name="default_profile"><option value="normalize-hls-sync-permissive" selected>Normalized + Audio Sync · Permissive</option><option value="normalize-hls-permissive">Normalized HLS · Permissive</option><option value="transcode-hls-permissive">Software HLS · Permissive</option><option value="normalize-hls-sync">Normalized + Audio Sync</option><option value="normalize-hls">Normalized HLS</option><option value="transcode-hls">Software HLS</option></select></label>
       <label>Refresh every<input name="refresh_hours" type="number" min="1" max="168" value="6"><span class="suffix">hours</span></label>
       <details class="span2"><summary>Advanced</summary><label>User Agent<input name="user_agent" placeholder="Browser-style User-Agent"></label></details>
       <div class="span2 actions"><button type="submit">Save Source</button><button type="button" class="secondary" onclick="resetSourceForm()">Clear</button></div>
@@ -64,42 +65,56 @@
 <section id="jellyfin" class="pane">
   <div class="panel integration">
     <h2>Jellyfin Integration</h2>
-    <p>These URLs always represent the current channel selection. No hand-written playlist is required.</p>
+    <p>These two URLs always represent your current channel selection. Stream Lab keeps the provider URLs hidden behind its local relay.</p>
     <div class="integration-grid">
       <div><b>M3U Tuner URL</b><div class="urlrow"><code id="playlistUrl"></code><button id="copyPlaylist">Copy</button></div></div>
       <div><b>XMLTV Guide URL</b><div class="urlrow"><code id="guideUrl"></code><button id="copyGuide">Copy</button></div></div>
     </div>
     <div class="guide-row"><span id="guideStatus">Guide has not been generated yet.</span><button onclick="refreshGuide()">Refresh Guide Now</button></div>
   </div>
-  <div class="panel"><h2>Jellyfin setup</h2><ol><li>Add an <b>M3U Tuner</b> using <code>/playlist.m3u</code>.</li><li>Add an <b>XMLTV</b> guide data provider using <code>/guide.xml</code>.</li><li>Refresh Jellyfin Live TV channels and guide data after changing your selection.</li></ol><p>Only selected, currently-present channels are exported. Their original provider URLs are replaced with Stream Lab HLS URLs.</p></div>
-  <div class="panel tuning-panel">
-    <h2>A/V Sync Tuning</h2>
-    <p><code>-dts_delta_threshold</code> is now adjustable without rebuilding Stream Lab. The value is in seconds and applies when a <b>new</b> FFmpeg session starts. Existing relays keep the value they started with.</p>
-    <form id="tuningForm" class="source-form">
-      <label>DTS delta threshold (seconds)<input id="dtsDeltaThreshold" name="dts_delta_threshold" type="number" min="0.1" max="3600" step="0.1" value="60"></label>
-      <label>A/V warning threshold (seconds)<input id="avSyncWarnSeconds" name="av_sync_warn_seconds" type="number" min="0.05" max="60" step="0.05" value="1"></label>
-      <label>A/V probe interval (seconds)<input id="avSyncProbeSeconds" name="av_sync_probe_seconds" type="number" min="5" max="300" step="1" value="30"></label>
-      <label>Audio Sync AAC bitrate (kbps)<input id="audioSyncBitrate" name="audio_sync_bitrate_kbps" type="number" min="64" max="320" step="16" value="160"></label>
-      <label>HLS idle timeout (seconds)<input id="hlsIdleTimeout" name="hls_idle_timeout_seconds" type="number" min="10" max="600" step="1" value="30"></label>
-      <div class="span2">
-        <b>Quick DTS presets:</b>
-        <div class="actions presets">
-          <button type="button" class="secondary" onclick="setDtsPreset(1)">1</button>
-          <button type="button" class="secondary" onclick="setDtsPreset(10)">10</button>
-          <button type="button" class="secondary" onclick="setDtsPreset(30)">30</button>
-          <button type="button" class="permissive" onclick="setDtsPreset(60)">60</button>
-          <button type="button" class="secondary" onclick="setDtsPreset(90)">90</button>
-          <button type="button" class="secondary" onclick="setDtsPreset(120)">120</button>
-        </div>
+  <div class="panel"><h2>Jellyfin setup</h2><ol><li>Add an <b>M3U Tuner</b> using <code>/playlist.m3u</code>.</li><li>Add an <b>XMLTV</b> guide provider using <code>/guide.xml</code>.</li><li>Refresh Jellyfin Live TV channels and guide data after changing your channel selection.</li></ol></div>
+</section>
+
+<section id="protection" class="pane">
+  <form id="protectionForm">
+    <div class="panel">
+      <div class="section-title"><div><h2>Playback Protection</h2><p>Three protections cover the most common FAST/SSAI failure modes. The defaults are appropriate for Samsung TV Plus testing.</p></div><span class="pill ok">Recommended defaults enabled</span></div>
+      <div class="protection-grid">
+        <label class="protection-card"><span><b>Pin one HLS rendition</b><small>Prevents FFmpeg from juggling every rendition and changing stream identities at SSAI boundaries.</small></span><input id="variantPinEnabled" name="variant_pin_enabled" type="checkbox" checked></label>
+        <label class="protection-card"><span><b>Automatic recovery</b><small>Warm-starts a fresh relay if A/V sync becomes unhealthy or output stalls.</small></span><input id="autoRecoveryEnabled" name="auto_recovery_enabled" type="checkbox" checked></label>
+        <label class="protection-card"><span><b>Capture SSAI transitions</b><small>Saves the manifest and raw segments around new discontinuities into the diagnostic bundle.</small></span><input id="ssaiCaptureEnabled" name="ssai_capture_enabled" type="checkbox" checked></label>
       </div>
-      <div class="span2 actions"><button type="submit">Save Tuning Settings</button></div>
-    </form>
-    <p class="meta">For the current Samsung SSAI issue, 60 seconds is the v0.2.2 starting point. The new <b>Normalized + Audio Sync · Permissive</b> profile keeps H.264 video as stream-copy while re-encoding/resynchronizing AAC audio.</p>
-  </div>
+      <div class="setting-row">
+        <label>Preferred rendition<select id="variantQuality" name="variant_quality"><option value="auto">Best available</option><option value="720p">Up to 720p</option><option value="540p">Up to 540p</option><option value="360p">Up to 360p</option></select></label>
+        <div class="hint">For the Samsung source we've been testing, <b>Best available</b> pins the 1280×720 child playlist instead of FFmpeg's previous 640×360 selection.</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Timestamp Tuning</h2>
+      <p>Adjust FFmpeg's discontinuity threshold without rebuilding the application. Changes apply when the next relay starts.</p>
+      <div class="setting-row">
+        <label>DTS delta threshold (seconds)<input id="dtsDeltaThreshold" name="dts_delta_threshold" type="number" min="0.1" max="3600" step="0.1" value="60"></label>
+        <div><b>Quick presets</b><div class="actions presets"><button type="button" class="secondary" onclick="setDtsPreset(30)">30</button><button type="button" class="secondary" onclick="setDtsPreset(60)">60</button><button type="button" class="permissive" onclick="setDtsPreset(120)">120</button><button type="button" class="secondary" onclick="setDtsPreset(180)">180</button><button type="button" class="secondary" onclick="setDtsPreset(300)">300</button></div></div>
+      </div>
+      <details class="advanced-settings">
+        <summary>Advanced recovery & audio settings</summary>
+        <div class="source-form advanced-grid">
+          <label>A/V warning threshold (seconds)<input id="avSyncWarnSeconds" name="av_sync_warn_seconds" type="number" min="0.05" max="60" step="0.05" value="1"></label>
+          <label>A/V probe interval (seconds)<input id="avSyncProbeSeconds" name="av_sync_probe_seconds" type="number" min="5" max="300" step="1" value="30"></label>
+          <label>Bad A/V probes before recovery<input id="avSyncRecoverySamples" name="av_sync_recovery_samples" type="number" min="1" max="10" step="1" value="2"></label>
+          <label>Output stall recovery (seconds)<input id="recoveryStallSeconds" name="recovery_stall_seconds" type="number" min="10" max="300" step="1" value="20"></label>
+          <label>Audio Sync AAC bitrate (kbps)<input id="audioSyncBitrate" name="audio_sync_bitrate_kbps" type="number" min="64" max="320" step="16" value="160"></label>
+          <label>HLS idle timeout (seconds)<input id="hlsIdleTimeout" name="hls_idle_timeout_seconds" type="number" min="10" max="600" step="1" value="30"></label>
+        </div>
+      </details>
+      <div class="actions"><button type="submit">Save Protection Settings</button><span class="meta">Running relays keep the settings they started with.</span></div>
+    </div>
+  </form>
 </section>
 
 <section id="sessions" class="pane">
-  <div class="panel"><h2>Diagnostic / Relay Sessions</h2><p>Manual tests remain fully instrumented. Jellyfin HLS relays are marked as managed and stop automatically after the configured idle timeout.</p><div id="sessionTable"></div></div>
+  <div class="panel"><h2>Diagnostic / Relay Sessions</h2><p>See the exact rendition, A/V health, recovery generation, and SSAI captures for each session. Bundles include the raw transition captures when enabled.</p><div id="sessionTable"></div></div>
 </section>
 </main>
 <div id="toast"></div>

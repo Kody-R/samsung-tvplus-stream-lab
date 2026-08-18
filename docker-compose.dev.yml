@@ -3,8 +3,8 @@ services:
     build:
       context: .
       args:
-        VERSION: 0.2.2
-    image: samsung-tvplus-stream-lab:0.2.2
+        VERSION: 0.2.3
+    image: samsung-tvplus-stream-lab:0.2.3
     container_name: samsung-stream-lab
     restart: unless-stopped
     ports:

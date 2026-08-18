@@ -30,6 +30,17 @@ DEFAULTS = {
         "guide_fetch_timeout_seconds": 30,
         "source_refresh_poll_seconds": 60,
         "hls_idle_timeout_seconds": 30,
+        "variant_pin_enabled": True,
+        "variant_quality": "auto",
+        "auto_recovery_enabled": True,
+        "av_sync_recovery_samples": 2,
+        "recovery_stall_seconds": 20,
+        "recovery_startup_timeout_seconds": 20,
+        "recovery_max_5min": 3,
+        "ssai_capture_enabled": True,
+        "ssai_capture_segments_before": 4,
+        "ssai_capture_segments_after": 8,
+        "ssai_capture_max_mb": 64,
     },
     "sources": [],
     "streams": [],
@@ -96,6 +107,12 @@ class ConfigStore:
             "av_sync_warn_seconds",
             "audio_sync_bitrate_kbps",
             "hls_idle_timeout_seconds",
+            "variant_pin_enabled",
+            "variant_quality",
+            "auto_recovery_enabled",
+            "av_sync_recovery_samples",
+            "recovery_stall_seconds",
+            "ssai_capture_enabled",
         }
         with self.lock:
             for key, value in fields.items():
@@ -112,6 +129,16 @@ class ConfigStore:
                     value = max(64, min(320, int(value)))
                 elif key == "hls_idle_timeout_seconds":
                     value = max(10, min(600, int(value)))
+                elif key in {"variant_pin_enabled", "auto_recovery_enabled", "ssai_capture_enabled"}:
+                    value = bool(value)
+                elif key == "variant_quality":
+                    value = str(value or "auto").strip().lower()
+                    if value not in {"auto", "720p", "540p", "360p"}:
+                        raise ValueError("variant_quality must be auto, 720p, 540p, or 360p")
+                elif key == "av_sync_recovery_samples":
+                    value = max(1, min(10, int(value)))
+                elif key == "recovery_stall_seconds":
+                    value = max(10, min(300, int(value)))
                 self.data["settings"][key] = value
             self.save()
             return dict(self.data["settings"])
@@ -149,7 +176,7 @@ class ConfigStore:
                 "m3u_url": m3u_url,
                 "xmltv_url": str(item.get("xmltv_url") or "").strip(),
                 "user_agent": str(item.get("user_agent") or old.get("user_agent") or DEFAULT_UA),
-                "default_profile": str(item.get("default_profile") or old.get("default_profile") or "normalize-hls-permissive"),
+                "default_profile": str(item.get("default_profile") or old.get("default_profile") or "normalize-hls-sync-permissive"),
                 "refresh_hours": max(1.0, float(item.get("refresh_hours") or old.get("refresh_hours") or 6)),
                 "enabled": bool(item.get("enabled", old.get("enabled", True))),
                 "last_refresh_utc": old.get("last_refresh_utc"),

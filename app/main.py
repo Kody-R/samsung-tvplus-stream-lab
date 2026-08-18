@@ -51,7 +51,7 @@ class SourceIn(BaseModel):
     m3u_url: str
     xmltv_url: str = ""
     user_agent: str = DEFAULT_UA
-    default_profile: str = "normalize-hls-permissive"
+    default_profile: str = "normalize-hls-sync-permissive"
     refresh_hours: float = Field(default=6, ge=1, le=168)
     enabled: bool = True
 
@@ -81,6 +81,12 @@ class TuningSettingsIn(BaseModel):
     av_sync_warn_seconds: float = Field(default=1.0, ge=0.05, le=60)
     audio_sync_bitrate_kbps: int = Field(default=160, ge=64, le=320)
     hls_idle_timeout_seconds: int = Field(default=30, ge=10, le=600)
+    variant_pin_enabled: bool = True
+    variant_quality: str = "auto"
+    auto_recovery_enabled: bool = True
+    av_sync_recovery_samples: int = Field(default=2, ge=1, le=10)
+    recovery_stall_seconds: int = Field(default=20, ge=10, le=300)
+    ssai_capture_enabled: bool = True
 
 
 @app.on_event("startup")
@@ -324,7 +330,7 @@ async def hls_playlist(sid: str):
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         if p.exists():
-            return Response(p.read_text(errors="replace"), media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store", "X-Stream-Lab-Session": rt.session_id})
+            return Response(sessions.render_playlist(rt), media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store", "X-Stream-Lab-Session": rt.session_id, "X-Stream-Lab-Generation": str(rt.recovery_generation)})
         if rt.proc and rt.proc.poll() is not None:
             raise HTTPException(502, "FFmpeg exited before producing HLS")
         await asyncio.sleep(0.2)
@@ -362,6 +368,24 @@ def ts_stream(sid: str):
 @app.get("/stream/{sid}/stream-permissive.ts")
 def ts_stream_permissive(sid: str):
     return _ts_response(sid, permissive=True)
+
+
+@app.get("/stream/{sid}/segments/{session_id}/{filename}")
+def hls_generation_segment(sid: str, session_id: str, filename: str):
+    if "/" in filename or ".." in filename or "/" in session_id or ".." in session_id:
+        raise HTTPException(400, "Invalid segment path")
+    rt = sessions.runtimes.get(session_id)
+    root = rt.root if rt else SESSIONS / session_id
+    if rt and str(rt.stream_id) != str(sid):
+        raise HTTPException(404, "Segment not found")
+    if not rt and not session_id.startswith(f"{sid}-"):
+        raise HTTPException(404, "Segment not found")
+    p = root / "output" / filename
+    if not p.exists():
+        raise HTTPException(404, "Segment not found")
+    if rt:
+        rt.last_client_access = time.time()
+    return FileResponse(p, media_type="video/mp2t", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/stream/{sid}/{filename}")
