@@ -5,7 +5,8 @@ from app.session import child_playlist_urls, parse_manifest
 
 S = {
     "ffmpeg_path": "ffmpeg",
-    "dts_delta_threshold": 1.0,
+    "dts_delta_threshold": 60.0,
+    "audio_sync_bitrate_kbps": 160,
     "hls_time": 3,
     "hls_list_size": 12,
     "hls_delete_threshold": 4,
@@ -67,3 +68,21 @@ def test_child_manifest_discovery_and_extensionless_segments():
     assert parsed["assets"] == 1
     assert parsed["extensionless_segments"] == 1
     assert parsed["extensionless_segment_urls"][0].endswith("/0/1925")
+
+
+def test_dts_threshold_is_configurable(tmp_path: Path):
+    settings = dict(S)
+    settings["dts_delta_threshold"] = 90.5
+    c = build("normalize-hls-permissive", C, settings, tmp_path / "threshold")
+    assert c[c.index("-dts_delta_threshold") + 1] == "90.5"
+    assert c.index("-dts_delta_threshold") < c.index("-i")
+
+
+def test_audio_sync_profile_copies_video_and_resyncs_audio(tmp_path: Path):
+    assert "normalize-hls-sync-permissive" in HLS_PROFILES
+    c = build("normalize-hls-sync-permissive", C, S, tmp_path / "sync")
+    assert c[c.index("-c:v") + 1] == "copy"
+    assert c[c.index("-c:a") + 1] == "aac"
+    assert c[c.index("-af") + 1] == "aresample=async=1:first_pts=0"
+    assert c[c.index("-b:a") + 1] == "160k"
+    assert c.index("-extension_picky") < c.index("-i")

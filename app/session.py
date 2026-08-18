@@ -112,6 +112,11 @@ class Runtime:
     monitor_stop: threading.Event = field(default_factory=threading.Event)
     managed_relay: bool = False
     last_client_access: float = field(default_factory=time.time)
+    av_sync_offset_seconds: float | None = None
+    av_sync_max_abs_seconds: float = 0.0
+    av_sync_status: str = "unknown"
+    av_sync_samples: int = 0
+    av_sync_last_probe: float = 0.0
 
     def status(self) -> dict[str, Any]:
         return {
@@ -126,6 +131,10 @@ class Runtime:
             "path": str(self.root),
             "managed_relay": self.managed_relay,
             "client_age": round(time.time() - self.last_client_access, 2),
+            "av_sync_offset_seconds": None if self.av_sync_offset_seconds is None else round(self.av_sync_offset_seconds, 3),
+            "av_sync_max_abs_seconds": round(self.av_sync_max_abs_seconds, 3),
+            "av_sync_status": self.av_sync_status,
+            "av_sync_samples": self.av_sync_samples,
         }
 
 
@@ -154,10 +163,14 @@ class SessionManager:
         metadata["session_profile"] = profile
         metadata["session_id"] = session_id
         metadata["session_started_utc"] = utc()
+        current_settings = self.config.settings()
+        metadata["effective_dts_delta_threshold"] = current_settings.get("dts_delta_threshold", 60.0)
+        metadata["audio_sync_bitrate_kbps"] = current_settings.get("audio_sync_bitrate_kbps", 160)
+        metadata["av_sync_warn_seconds"] = current_settings.get("av_sync_warn_seconds", 1.0)
         (root / "stream.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
         rt = Runtime(session_id, sid, profile, root)
         self.runtimes[session_id] = rt
-        event(root / "events.jsonl", "session_start", profile=profile, command=shell_join(cmd))
+        event(root / "events.jsonl", "session_start", profile=profile, command=shell_join(cmd), dts_delta_threshold=self.config.settings().get("dts_delta_threshold", 60.0))
         return rt
 
     def start(self, sid: str, profile: str, *, managed_relay: bool = False) -> Runtime:
@@ -183,6 +196,10 @@ class SessionManager:
         metadata["session_profile"] = profile
         metadata["session_id"] = session_id
         metadata["session_started_utc"] = utc()
+        current_settings = self.config.settings()
+        metadata["effective_dts_delta_threshold"] = current_settings.get("dts_delta_threshold", 60.0)
+        metadata["audio_sync_bitrate_kbps"] = current_settings.get("audio_sync_bitrate_kbps", 160)
+        metadata["av_sync_warn_seconds"] = current_settings.get("av_sync_warn_seconds", 1.0)
         (root / "stream.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
         log = (root / "ffmpeg.log").open("wb", buffering=0)
         proc = subprocess.Popen(
@@ -195,7 +212,7 @@ class SessionManager:
         )
         rt = Runtime(session_id, sid, profile, root, proc, managed_relay=managed_relay)
         self.runtimes[session_id] = rt
-        event(root / "events.jsonl", "session_start", profile=profile, command=shell_join(cmd))
+        event(root / "events.jsonl", "session_start", profile=profile, command=shell_join(cmd), dts_delta_threshold=self.config.settings().get("dts_delta_threshold", 60.0))
         threading.Thread(target=self._progress, args=(rt,), daemon=True).start()
         threading.Thread(target=self._monitor, args=(rt, stream), daemon=True).start()
         return rt
@@ -320,6 +337,68 @@ class SessionManager:
             )
         return True
 
+    def _sample_av_sync(self, rt: Runtime) -> None:
+        settings = self.config.settings()
+        interval = max(5.0, float(settings.get("av_sync_probe_seconds", 30)))
+        now = time.time()
+        if now - rt.av_sync_last_probe < interval:
+            return
+        rt.av_sync_last_probe = now
+        output_dir = rt.root / "output"
+        segments = sorted(output_dir.glob("segment_*.ts"))
+        if not segments:
+            return
+        segment = segments[-1]
+        cmd = [
+            str(settings.get("ffprobe_path", "ffprobe")),
+            "-v", "error",
+            "-show_entries", "stream=codec_type,start_time",
+            "-of", "json",
+            str(segment),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
+            if result.returncode != 0:
+                return
+            payload = json.loads(result.stdout or "{}")
+            starts: dict[str, float] = {}
+            for item in payload.get("streams", []):
+                kind = str(item.get("codec_type") or "")
+                if kind not in {"video", "audio"} or kind in starts:
+                    continue
+                try:
+                    starts[kind] = float(item.get("start_time"))
+                except (TypeError, ValueError):
+                    pass
+            if "video" not in starts or "audio" not in starts:
+                return
+            offset = starts["audio"] - starts["video"]
+            warning = max(0.05, float(settings.get("av_sync_warn_seconds", 1.0)))
+            previous = rt.av_sync_status
+            rt.av_sync_offset_seconds = offset
+            rt.av_sync_max_abs_seconds = max(rt.av_sync_max_abs_seconds, abs(offset))
+            rt.av_sync_samples += 1
+            rt.av_sync_status = "desynced" if abs(offset) >= warning else "healthy"
+            event(
+                rt.root / "events.jsonl",
+                "av_sync_sample",
+                segment=segment.name,
+                offset_seconds=round(offset, 6),
+                max_abs_seconds=round(rt.av_sync_max_abs_seconds, 6),
+                status=rt.av_sync_status,
+                warning_threshold_seconds=warning,
+            )
+            if rt.av_sync_status == "desynced" and previous != "desynced":
+                event(
+                    rt.root / "events.jsonl",
+                    "av_sync_warning",
+                    segment=segment.name,
+                    offset_seconds=round(offset, 6),
+                    warning_threshold_seconds=warning,
+                )
+        except Exception as exc:
+            event(rt.root / "events.jsonl", "av_sync_probe_error", segment=segment.name, error=str(exc))
+
     def _monitor(self, rt: Runtime, stream: dict) -> None:
         settings = self.config.settings()
         poll = float(settings.get("manifest_poll_seconds", 1))
@@ -391,6 +470,8 @@ class SessionManager:
                             last_out = txt
                     except Exception as exc:
                         event(rt.root / "events.jsonl", "output_manifest_error", error=str(exc))
+                if rt.profile in HLS_PROFILES:
+                    self._sample_av_sync(rt)
 
     def stop(self, session_id: str, *, reason: str = "manual") -> None:
         rt = self.runtimes.get(session_id)

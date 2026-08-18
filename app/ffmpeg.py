@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-BASE_HLS_PROFILES = {"normalize-hls", "transcode-hls", "vaapi-hls", "qsv-hls"}
+BASE_HLS_PROFILES = {"normalize-hls", "normalize-hls-sync", "transcode-hls", "vaapi-hls", "qsv-hls"}
 PERMISSIVE_HLS_PROFILES = {f"{name}-permissive" for name in BASE_HLS_PROFILES}
 HLS_PROFILES = BASE_HLS_PROFILES | PERMISSIVE_HLS_PROFILES
 NULL_PROFILES = {"copy-null", "copy-null-permissive", "ts-null"}
@@ -37,11 +37,11 @@ def base_input(stream: dict, settings: dict, *, progress: str = "pipe:1") -> lis
 def build(profile: str, stream: dict, settings: dict, out_dir: Path) -> list[str]:
     base = canonical_profile(profile)
     cmd = base_input(stream, settings)
-    threshold = str(settings.get("dts_delta_threshold", 1.0))
+    threshold = str(settings.get("dts_delta_threshold", 60.0))
 
     if base in BASE_HLS_PROFILES or base in {"copy-null", "ts-null"}:
         cmd += ["-dts_delta_threshold", threshold]
-    if base in {"transcode-hls", "vaapi-hls", "qsv-hls"}:
+    if base in {"normalize-hls-sync", "transcode-hls", "vaapi-hls", "qsv-hls"}:
         cmd += ["-fflags", "+genpts"]
     if is_permissive(profile):
         # Samsung/Akamai SSAI can expose valid HLS segment URLs without a normal file
@@ -68,6 +68,16 @@ def build(profile: str, stream: dict, settings: dict, out_dir: Path) -> list[str
         return cmd
     if base == "normalize-hls":
         cmd += ["-c:v", "copy", "-c:a", "copy"]
+    elif base == "normalize-hls-sync":
+        # Preserve the original H.264 video while giving audio its own timestamp
+        # correction path. This is intended for FAST/SSAI feeds that stay alive
+        # but develop A/V drift after timestamp discontinuities.
+        bitrate = max(64, min(320, int(settings.get("audio_sync_bitrate_kbps", 160))))
+        cmd += [
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", f"{bitrate}k",
+            "-af", "aresample=async=1:first_pts=0",
+        ]
     elif base == "transcode-hls":
         cmd += [
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
@@ -109,7 +119,7 @@ def build_ts_relay(stream: dict, settings: dict, *, permissive: bool = False) ->
     # Progress shares stderr with FFmpeg diagnostics. SessionManager tees the raw stream
     # to ffmpeg.log and extracts progress key/value blocks while stdout stays pure MPEG-TS.
     cmd = base_input(stream, settings, progress="pipe:2")
-    cmd += ["-dts_delta_threshold", str(settings.get("dts_delta_threshold", 1.0))]
+    cmd += ["-dts_delta_threshold", str(settings.get("dts_delta_threshold", 60.0))]
     if permissive:
         cmd += ["-extension_picky", "0"]
     cmd += [

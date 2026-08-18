@@ -17,7 +17,11 @@ DEFAULTS = {
         "ffprobe_path": "ffprobe",
         "manifest_poll_seconds": 1.0,
         "freeze_seconds": 8.0,
-        "dts_delta_threshold": 1.0,
+        "dts_delta_threshold": 60.0,
+        "dts_delta_threshold_user_set": False,
+        "av_sync_probe_seconds": 30,
+        "av_sync_warn_seconds": 1.0,
+        "audio_sync_bitrate_kbps": 160,
         "hls_time": 3,
         "hls_list_size": 12,
         "hls_delete_threshold": 4,
@@ -49,8 +53,19 @@ class ConfigStore:
         data.setdefault("settings", {})
         data.setdefault("sources", [])
         data.setdefault("streams", [])
+        raw_settings = dict(data["settings"])
         merged = dict(DEFAULTS["settings"])
-        merged.update(data["settings"])
+        merged.update(raw_settings)
+        # v0.2.1 and earlier hard-coded 1.0 seconds and had no UI control.
+        # Upgrade that untouched legacy default to the safer v0.2.2 starting point,
+        # while preserving any value that was already manually customized.
+        if "dts_delta_threshold_user_set" not in raw_settings:
+            try:
+                if float(raw_settings.get("dts_delta_threshold", 1.0)) == 1.0:
+                    merged["dts_delta_threshold"] = 60.0
+            except (TypeError, ValueError):
+                merged["dts_delta_threshold"] = 60.0
+            merged["dts_delta_threshold_user_set"] = False
         data["settings"] = merged
 
         # Migration from v0.1.x: manual streams were enabled/disabled rather than selected.
@@ -72,6 +87,33 @@ class ConfigStore:
 
     def settings(self) -> dict[str, Any]:
         with self.lock:
+            return dict(self.data["settings"])
+
+    def update_settings(self, **fields: Any) -> dict[str, Any]:
+        allowed = {
+            "dts_delta_threshold",
+            "av_sync_probe_seconds",
+            "av_sync_warn_seconds",
+            "audio_sync_bitrate_kbps",
+            "hls_idle_timeout_seconds",
+        }
+        with self.lock:
+            for key, value in fields.items():
+                if key not in allowed:
+                    continue
+                if key == "dts_delta_threshold":
+                    value = max(0.1, min(3600.0, float(value)))
+                    self.data["settings"]["dts_delta_threshold_user_set"] = True
+                elif key == "av_sync_probe_seconds":
+                    value = max(5, min(300, int(value)))
+                elif key == "av_sync_warn_seconds":
+                    value = max(0.05, min(60.0, float(value)))
+                elif key == "audio_sync_bitrate_kbps":
+                    value = max(64, min(320, int(value)))
+                elif key == "hls_idle_timeout_seconds":
+                    value = max(10, min(600, int(value)))
+                self.data["settings"][key] = value
+            self.save()
             return dict(self.data["settings"])
 
     def streams(self) -> list[dict[str, Any]]:

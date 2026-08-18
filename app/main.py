@@ -75,6 +75,14 @@ class ChannelPatch(BaseModel):
     xmltv_channel_id: str | None = None
 
 
+class TuningSettingsIn(BaseModel):
+    dts_delta_threshold: float = Field(default=60.0, ge=0.1, le=3600)
+    av_sync_probe_seconds: int = Field(default=30, ge=5, le=300)
+    av_sync_warn_seconds: float = Field(default=1.0, ge=0.05, le=60)
+    audio_sync_bitrate_kbps: int = Field(default=160, ge=64, le=320)
+    hls_idle_timeout_seconds: int = Field(default=30, ge=10, le=600)
+
+
 @app.on_event("startup")
 def startup() -> None:
     sources.start_scheduler()
@@ -118,6 +126,14 @@ def status():
         "settings": config.settings(),
         "summary": _summary(streams),
     }
+
+
+@app.post("/api/settings/tuning")
+def save_tuning_settings(body: TuningSettingsIn):
+    try:
+        return config.update_settings(**body.model_dump())
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.get("/api/channels")

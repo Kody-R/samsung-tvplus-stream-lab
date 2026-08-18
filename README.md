@@ -1,8 +1,8 @@
-# Samsung TV Plus Stream Lab v0.2.1
+# Samsung TV Plus Stream Lab v0.2.2
 
 Samsung TV Plus Stream Lab is a Docker/CasaOS IPTV stabilization gateway and diagnostic laboratory for Samsung TV Plus, FAST and SSAI HLS streams before they reach Jellyfin.
 
-v0.2.1 includes the v0.2 source-import/channel-selection workflow plus an XMLTV compatibility fix for providers that interleave channel and programme elements. Instead of manually adding every channel, give Stream Lab the provider M3U and XMLTV source, choose which channels you want, and Jellyfin receives a filtered playlist whose selected channels are routed through Stream Lab.
+v0.2.2 includes the v0.2 source-import/channel-selection workflow, the interleaved-XMLTV compatibility fix, and runtime A/V sync tuning for problematic FAST/SSAI streams. Instead of manually adding every channel, give Stream Lab the provider M3U and XMLTV source, choose which channels you want, and Jellyfin receives a filtered playlist whose selected channels are routed through Stream Lab.
 
 ## Architecture
 
@@ -78,8 +78,10 @@ The Channels tab supports filters for:
 Per-channel playback profiles include:
 
 - Normalized HLS · Permissive (recommended/default)
+- Normalized + Audio Sync · Permissive
 - Software HLS · Permissive
 - Normalized HLS
+- Normalized + Audio Sync
 - Software HLS
 
 The permissive profiles use FFmpeg `-extension_picky 0`, which was validated against Samsung/Akamai extensionless SSAI segments during the v0.1.x investigation.
@@ -119,6 +121,22 @@ Selecting 300 channels does **not** start 300 FFmpeg processes.
 Jellyfin starts a managed relay by requesting its HLS URL. The relay is touched by HLS playlist/segment requests and automatically stops after 30 seconds without a client by default.
 
 Manual diagnostic sessions remain separate and are not subject to the relay idle timeout.
+
+## A/V sync tuning
+
+The **Jellyfin → A/V Sync Tuning** panel exposes:
+
+- DTS delta threshold: 0.1–3600 seconds
+- A/V probe interval: 5–300 seconds
+- A/V warning threshold: 0.05–60 seconds
+- Audio Sync AAC bitrate: 64–320 kbps
+- HLS idle timeout: 10–600 seconds
+
+Quick DTS presets are provided for 1, 10, 30, 60, 90 and 120 seconds, while the numeric field accepts custom decimal values. Changes are persisted to `/app/data/streams.json` and affect newly started FFmpeg sessions.
+
+The v0.2.2 starting recommendation is **60 seconds**. Existing v0.2.1 configurations that still contain the untouched hard-coded `1.0` default are migrated to `60.0`; previously customized values are preserved.
+
+Active HLS sessions sample the newest output segment with ffprobe at the configured interval. The Diagnostics table reports the current A/V offset, while `events.jsonl` records `av_sync_sample` and threshold-crossing `av_sync_warning` events.
 
 ## Diagnostics
 
@@ -175,14 +193,14 @@ docker compose -f docker-compose.dev.yml -f docker-compose.hw.yml up -d --build
 
 ```text
 ghcr.io/kody-r/samsung-tvplus-stream-lab:latest
-ghcr.io/kody-r/samsung-tvplus-stream-lab:0.2.1
+ghcr.io/kody-r/samsung-tvplus-stream-lab:0.2.2
 ```
 
 Typical release push:
 
 ```bash
 git add .
-git commit -m "Release v0.2.1 - source import and channel selector"
+git commit -m "Release v0.2.2 - A/V sync tuning"
 git push
 ```
 
@@ -190,6 +208,7 @@ git push
 
 ```text
 GET    /api/status
+POST   /api/settings/tuning
 GET    /api/channels
 POST   /api/channels/select
 PATCH  /api/channels/{id}
@@ -206,8 +225,14 @@ POST   /api/guide/refresh
 
 ```json
 {
+  "dts_delta_threshold": 60.0,
+  "av_sync_probe_seconds": 30,
+  "av_sync_warn_seconds": 1.0,
+  "audio_sync_bitrate_kbps": 160,
   "guide_cache_seconds": 900,
   "source_refresh_poll_seconds": 60,
   "hls_idle_timeout_seconds": 30
 }
 ```
+
+The DTS delta threshold is editable under **Jellyfin → A/V Sync Tuning** and applies to newly started FFmpeg sessions. The `Normalized + Audio Sync · Permissive` profile keeps video as stream-copy and uses AAC re-encoding plus `aresample=async=1:first_pts=0` for audio correction.
